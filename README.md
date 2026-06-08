@@ -1,223 +1,164 @@
-# Практическая работа №14 — очередь задач (producer–consumer)
+<h1 align="center"> Привет! Я <a target="_blank"> Кармеев Артур из группы ЭФМО-01-25 </a> 
+<img src="https://github.com/blackcater/blackcater/raw/main/images/Hi.gif" height="32"/></h1>
+<h3 align="center"> Данная практика была непростой :hushed:  </h3>
 
-Продолжение ПЗ 13. Вместо события task.created — задача (job) в очереди task_jobs с retries и DLQ.
+<h3 align="center"> Практическая работа №14: Реализация очереди задач (producer–consumer) </h3>
 
-## Структура проекта
 
-```
-pz14-rabbitmq/
-  deploy/rabbit/
-    docker-compose.yml          # RabbitMQ (pz14-rabbitmq)
 
-  internal/
-    amqpclient/                 # подключение к RabbitMQ
-    jobs/                       # формат TaskJob
-    rabbitsetup/                # объявление task_jobs и task_jobs_dlq
+Структура работы:
 
-  services/
-    tasks/
-      cmd/tasks/main.go         # HTTP API + producer jobs (шаг 4)
-      internal/
-        http/                   # REST handlers
-        jobs/                   # публикация job в очередь
-        service/                # бизнес-логика
-        task/                   # модель Task, in-memory repo
+    └── pz14-rabbitmq/
+        ├── .gitignore
+        ├── go.mod
+        ├── go.sum
+        ├── README.md
+        ├── .idea/
+        │   ├── .gitignore
+        │   ├── modules.xml
+        │   ├── pz14-rabbitmq.iml
+        │   └── workspace.xml
+        ├── .git/
+        ├── internal/
+        │   ├── rabbitsetup/
+        │   │   └── queues.go
+        │   ├── jobs/
+        │   │   ├── publish.go
+        │   │   └── task_job.go
+        │   └── amqpclient/
+        │       ├── config.go
+        │       └── connect.go
+        ├── deploy/
+        │   └── rabbit/
+        │       └── docker-compose.yml
+        └── services/
+            ├── worker/
+            │   ├── internal/
+            │   │   ├── store/
+            │   │   │   └── processed_store.go
+            │   │   └── consumer/
+            │   │       ├── consumer.go
+            │   │       └── process.go
+            │   └── cmd/
+            │       └── worker/
+            │           └── main.go
+            └── tasks/
+                ├── internal/
+                │   ├── task/
+                │   │   ├── model.go
+                │   │   └── repo.go
+                │   ├── service/
+                │   │   └── task_service.go
+                │   └── http/
+                │       ├── handler.go
+                │       └── jobs_handler.go
+                └── cmd/
+                    └── tasks/
+                        └── main.go
 
-    worker/
-      cmd/worker/main.go        # consumer
-      internal/
-        consumer/               # обработка task_jobs
-        store/                  # идемпотентность (message_id)
-```
 
-## Очереди
+## 1. Поднять RabbitMQ
 
-- task_jobs — основная очередь задач
-- task_jobs_dlq — проблемные сообщения после исчерпания попыток
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/74c13338-9b68-4afd-abcc-014919fbabc5" /></td>
+  </tr>
+</table>
 
-## Запуск (после реализации шагов)
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/d7551f09-183b-493f-bbc4-da98ad1bf8b2" /></td>
+  </tr>
+</table>
 
-RabbitMQ:
-```
-cd deploy/rabbit
-docker compose up -d
-```
 
-Tasks:
-```
-go run ./services/tasks/cmd/tasks
-```
 
-Worker:
-```
-go run ./services/worker/cmd/worker
-```
+## 2. Запуск системы
 
-Management UI: http://localhost:15672 (guest / guest)
 
-## REST API tasks (из ПЗ 13)
+Запуск worker
 
-GET /v1/tasks, GET /v1/tasks/{id}, POST /v1/tasks, PATCH, DELETE, GET /health
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="516" alt="image" src="https://github.com/user-attachments/assets/aaba3b96-1af8-4eb9-b43e-ed7bbe9d0349" /></td>
+  </tr>
+</table>
 
-Endpoint для jobs (шаг 4):
-POST /v1/jobs/process-task
+Запуск tasks
 
-## Шаг 2. Формат сообщения задачи
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="516" alt="image" src="https://github.com/user-attachments/assets/e7f7c7b9-d83a-4a68-a6ab-d91ff0d5d8bd" /></td>
+  </tr>
+</table>
 
-Структура в internal/jobs/task_job.go
 
-Обязательные поля JSON:
+## 3. Проверить постановку обычной задачи
 
-| Поле | Описание |
-|------|----------|
-| job | тип задачи, у нас process_task |
-| task_id | id бизнес-объекта, например t_001 |
-| attempt | номер попытки, при постановке = 1 |
-| message_id | уникальный id сообщения (uuid) |
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/6e2bb1c6-3bfa-451d-86f7-37519173df83" /></td>
+  </tr>
+</table>
 
-Пример сообщения в очереди task_jobs:
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/b3389431-2d32-46a1-8d12-79747be55971" /></td>
+  </tr>
+</table>
 
-```json
-{
-  "job": "process_task",
-  "task_id": "t_001",
-  "attempt": 1,
-  "message_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
 
-Создание в коде:
+## 4. Проверить retries и DLQ
 
-```go
-job := jobs.NewProcessTaskJob("t_001", uuid.New().String())
-```
+1-ый запрос
 
-Отличие от ПЗ 13: там было событие (event, ts), здесь — задача на выполнение работы с attempt и message_id для retries и идемпотентности.
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="515" alt="image" src="https://github.com/user-attachments/assets/88a8b9fb-4452-477f-a0f0-edd7d1df9300" /></td>
+  </tr>
+</table>
 
-## Шаг 3. Объявление очередей
+2-ой запрос
 
-Пакет internal/rabbitsetup/queues.go
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/5e90dab0-3fb6-455e-be94-9852e31d17d1" /></td>
+  </tr>
+</table>
 
-Очереди:
-- task_jobs — основная, durable=true
-- task_jobs_dlq — DLQ, durable=true
+3-йи запрос
 
-У task_jobs заданы x-dead-letter-exchange (default) и x-dead-letter-routing-key → task_jobs_dlq. Основной перевод в DLQ — вручную в worker после 3 неудачных попыток.
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/01b3768f-a8e5-4751-9145-46890ff395c1" /></td>
+  </tr>
+</table>
 
-Если при старте ошибка PRECONDITION_FAILED — удалить старые очереди в UI (Queues → Delete) или пересоздать контейнер:
-```
-docker compose down
-docker compose up -d
-```
+Отправка на каторгу (DLQ)
 
-DeclareQueues вызывается при старте tasks и worker.
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="518" alt="image" src="https://github.com/user-attachments/assets/4a92b45c-7132-495b-9df3-ff64c34f678a" /></td>
+  </tr>
+</table>
 
-Проверка:
 
-```
-cd deploy/rabbit
-docker compose up -d
+## 5. Проверить DLQ через RabbitMQ Management UI
 
-go run ./services/worker/cmd/worker
-```
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="517" alt="image" src="https://github.com/user-attachments/assets/840f404e-accd-484e-b519-c2261072d33a" /></td>
+  </tr>
+</table>
 
-В логе: `queues declared: task_jobs, task_jobs_dlq`
+<table cellpadding="10">
+  <tr>
+    <td><img width="974" height="518" alt="image" src="https://github.com/user-attachments/assets/b7756aef-84f2-4dbe-aaba-7863e1526915" /></td>
+  </tr>
+</table>
 
-В http://localhost:15672 → Queues — обе очереди должны появиться.
 
-## Шаг 4. Постановка задачи в очередь
-
-POST /v1/jobs/process-task
-
-Тело запроса:
-```json
-{"task_id": "t_001"}
-```
-
-Ответ (202 Accepted):
-```json
-{"status": "accepted", "task_id": "t_001"}
-```
-
-Сервис проверяет task_id, формирует TaskJob (attempt=1, message_id=uuid), публикует в task_jobs.
-
-Запуск:
-```
-$env:RABBIT_URL="amqp://guest:guest@localhost:5672/"
-go run ./services/tasks/cmd/tasks
-```
-
-Проверка:
-```
-[System.IO.File]::WriteAllText("job.json", '{"task_id":"t_001"}')
-curl.exe -i -X POST http://localhost:8082/v1/jobs/process-task -H "Content-Type: application/json" -d "@job.json"
-```
-
-В RabbitMQ UI в очереди task_jobs появится сообщение.
-
-## Шаг 5. Worker (consumer)
-
-services/worker/internal/consumer — читает task_jobs, обрабатывает job, ack/retry/DLQ.
-
-Порядок обработки:
-1. получить сообщение из task_jobs
-2. проверить message_id (идемпотентность, store)
-3. processTask — имитация работы 2 сек
-4. успех → MarkDone + ack
-5. ошибка → attempt++, retry в task_jobs (макс. 3 попытки) или в task_jobs_dlq
-
-t_fail — всегда ошибка (для проверки retries и DLQ).
-
-Запуск:
-```
-$env:RABBIT_URL="amqp://guest:guest@localhost:5672/"
-go run ./services/worker/cmd/worker
-```
-
-Порядок: RabbitMQ → worker → tasks → POST /v1/jobs/process-task
-
-Успех (t_001):
-```
-curl.exe -i -X POST http://localhost:8082/v1/jobs/process-task -H "Content-Type: application/json" -d "@job.json"
-```
-В логе worker: processing → done → ack
-
-Ошибка (t_fail):
-```
-[System.IO.File]::WriteAllText("job-fail.json", '{"task_id":"t_fail"}')
-curl.exe -i -X POST http://localhost:8082/v1/jobs/process-task -H "Content-Type: application/json" -d "@job-fail.json"
-```
-В логе: 3 попытки, затем moved to dlq. Сообщение в task_jobs_dlq (UI).
-
-## Шаг 12. Retries и DLQ (t_fail)
-
-В repo есть задача t_fail — worker всегда падает на ней.
-
-PowerShell:
-```
-[System.IO.File]::WriteAllText("job-fail.json", '{"task_id":"t_fail"}')
-curl.exe -i -X POST http://localhost:8082/v1/jobs/process-task -H "Content-Type: application/json" -d "@job-fail.json"
-```
-
-Ожидаемый ответ tasks: HTTP 202 Accepted.
-
-В логе worker (каждая попытка ~2 сек):
-```
-processing task_id=t_fail attempt=1
-process error ...
-retry scheduled attempt=2
-processing task_id=t_fail attempt=2
-...
-moved to dlq task_id=t_fail
-```
-
-Если в worker тишина — проверь:
-1. worker запущен до curl
-2. tasks перезапущен после добавления t_fail
-3. curl вернул 202, а не 404 task not found
-4. RabbitMQ запущен
-
-## Контрольные вопросы
+## 6. Контрольные вопросы :no_mouth:
 
 **1. Чем задача в очереди отличается от простого события?**
 
